@@ -10,17 +10,19 @@ class Map:
     def initialize_particles(self):
         self._particles.append(
             Particle(
-                velocity=np.array([0, 0]),
+                velocity=np.array([0, 1]),
                 coordinates=np.array([0.1, 0.1]),
                 power=1,
-                step_size=0.05
+                step_size=0.05,
+                n_move_vectors=12
             )
         )
         self._particles.append(
             Particle(
-                velocity=np.array([0, 0]),
+                velocity=np.array([-1, 0]),
                 coordinates=np.array([0.9, 0.9]),
                 power=0,
-                step_size=0.05
+                step_size=0.05,
+                n_move_vectors=12
             )
         )
