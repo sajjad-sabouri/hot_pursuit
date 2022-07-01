@@ -1,4 +1,4 @@
-from classes.boundary import Line_With_Vector_And_Point
+from classes.map import Line_With_Vector_And_Point
 import numpy as np
 
 
@@ -9,11 +9,11 @@ class Particle:
         self._power = kwargs['power'] if 'power' in kwargs else None
         self._step_size = kwargs['step_size'] if 'step_size' in kwargs else None
         self._n_move_vectors = kwargs['n_move_vectors'] if 'n_move_vectors' in kwargs else None
-        self._map = kwargs['map'] if 'map' in kwargs else None
+        self._battle = kwargs['battle'] if 'battle' in kwargs else None
         self._move_vectors = []
         self._distances = []
         self.construct_move_vectors()
-        self.find_distance_to_corners()
+        self.find_distance_to_boundaries()
 
     def construct_move_vectors(self):
         base_vector = self._velocity
@@ -28,13 +28,13 @@ class Particle:
             )
             self._move_vectors.append(np.matmul(rotation_matrix, base_vector))
 
-    def find_distance_to_corners(self):
+    def find_distance_to_boundaries(self):
         self._distances.clear()
 
         for move_vector in self._move_vectors:
-            distances = np.zeros(len(self._map.get_boundaries()))
+            distances = np.zeros(len(self._battle.get_map_boundaries()))
             counter = 0
-            for boundary in self._map.get_boundaries():
+            for boundary in self._battle.get_map_boundaries():
                 distance = boundary.find_distance_to_line(
                     Line_With_Vector_And_Point(
                         vector=move_vector,
