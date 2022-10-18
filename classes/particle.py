@@ -1,47 +1,58 @@
-from classes.map import Line_With_Vector_And_Point
 import numpy as np
+from copy import copy
 
 
 class Particle:
     def __init__(self, **kwargs):
-        self._velocity = kwargs['velocity'] if 'velocity' in kwargs else None
-        self._coordinates = kwargs['coordinates'] if 'coordinates' in kwargs else None
-        self._power = kwargs['power'] if 'power' in kwargs else None
-        self._step_size = kwargs['step_size'] if 'step_size' in kwargs else None
-        self._n_move_vectors = kwargs['n_move_vectors'] if 'n_move_vectors' in kwargs else None
-        self._battle = kwargs['battle'] if 'battle' in kwargs else None
-        self._move_vectors = []
-        self._distances = []
-        self.construct_move_vectors()
-        self.find_distance_to_boundaries()
+        self._n_dims = kwargs['n_dims']
+        self._bounds = kwargs['bounds']
+        self._cost_function = kwargs['cost_function']
+        self._problem_state = kwargs['problem_state'] if 'problem_state' in kwargs else None
+        self._position = self.initialize_random_position()
+        self._cost = self._cost_function(self._position, self._problem_state)
+        self._velocity = np.zeros((1, self._n_dims))
+        self._best_position = copy(self._position)
+        self._best_cost = self._cost
 
-    def construct_move_vectors(self):
-        base_vector = self._velocity
-        theta_array = np.linspace(0, 2 * np.pi, self._n_move_vectors+1)
+    def initialize_random_position(self):
+        return self._bounds['lower_bounds'] + np.random.rand(1, self._n_dims) * (self._bounds['upper_bounds'] - self._bounds['lower_bounds'])
 
-        self._move_vectors.clear()
-        for theta_index in range(theta_array.shape[0] - 1):
-            theta = theta_array[theta_index]
-            rotation_matrix = np.array(
-                [[np.cos(theta), -np.sin(theta)],
-                [np.sin(theta), np.cos(theta)]]
-            )
-            self._move_vectors.append(np.matmul(rotation_matrix, base_vector))
+    def update_best_position(self):
+        if self._cost < self._best_cost:
+            self._best_cost = copy(self._cost)
+            self._best_position = copy(self._position)
 
-    def find_distance_to_boundaries(self):
-        self._distances.clear()
+    def update_position(self, global_best_particle, options):
 
-        for move_vector in self._move_vectors:
-            distances = np.zeros(len(self._battle.get_map_boundaries()))
-            counter = 0
-            for boundary in self._battle.get_map_boundaries():
-                distance = boundary.find_distance_to_line(
-                    Line_With_Vector_And_Point(
-                        vector=move_vector,
-                        point=self._coordinates
-                    )
-                )
-                distances[counter] = distance if distance is not None else np.inf
-                counter += 1
+        # deduct new position
+        new_velocity = \
+            options['c1'] * (global_best_particle.get_position() - self._position) + \
+            options['c2'] * (self._best_position - self._position) + \
+            options['w'] * self._velocity
 
-            self._distances.append(np.min(distances))
+        new_position = self._position + new_velocity
+
+        # modifying position and velocity according to bounds
+        new_velocity[new_position > self._bounds['upper_bounds']] = 0
+        new_velocity[new_position < self._bounds['lower_bounds']] = 0
+        new_position[new_position > self._bounds['upper_bounds']] = self._bounds['upper_bounds'][new_position > self._bounds['upper_bounds']]
+        new_position[new_position < self._bounds['lower_bounds']] = self._bounds['lower_bounds'][new_position < self._bounds['lower_bounds']]
+
+        self._temp_position = new_position
+        self._temp_velocity = new_velocity
+
+        return new_position
+
+    def apply_new_state(self, new_cost):
+
+        if new_cost < self._cost:
+            self._cost = new_cost
+            self._position = copy(self._temp_position)
+            self._velocity = copy(self._temp_velocity)
+            self.update_best_position()
+
+    def get_cost(self):
+        return self._cost
+
+    def get_position(self):
+        return self._position
