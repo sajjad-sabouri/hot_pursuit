@@ -1,0 +1,197 @@
+from classes.vector_player import Vector_Player
+from classes.battleground import Battleground
+from classes.weight_functions import WeightFunctions
+from pyswarms.single.global_best import GlobalBestPSO
+from pyswarms.utils.plotters import plot_cost_history
+import numpy as np
+import json
+from matplotlib import pyplot as plt
+import pickle
+from copy import copy
+from classes.free_player import Free_Player
+
+with open('configs/general_optimization.config') as f:
+    general_opt_configs = json.load(f)
+    hyper_parameters = {
+        'c1': general_opt_configs['c1'],
+        'c2': general_opt_configs['c2'],
+        'w': general_opt_configs['w']
+    }
+    n_particles = general_opt_configs['n_particles']
+    n_iterations = general_opt_configs['n_iterations']
+    n_processes = general_opt_configs['n_threads']
+
+# Load calibrated movement algorithm
+with open('states/movement_algorithm_rbf.pickle', 'rb') as f:
+    drivers = pickle.load(f)
+
+optimization_weight_function_format = 'polynomial'
+
+if optimization_weight_function_format == 'polynomial':
+    configs_file = 'configs/polynomial_orientation_optimization.config'
+elif optimization_weight_function_format == 'sigmoid':
+    configs_file = 'configs/sigmoid_orientation_optimization.config'
+
+with open(configs_file, 'r') as f:
+    optimization_config = json.load(f)
+    n_var = optimization_config['n_variables']
+    max_simulation_steps = optimization_config['max_simulation_steps']
+
+    x_min = np.array(
+        [
+            optimization_config[f"variable_{str(i)}_lower_bound"] for i in range(1, n_var + 1)
+        ]
+    )
+    x_max = np.array(
+        [
+            optimization_config[f"variable_{str(i)}_upper_bound"] for i in range(1, n_var + 1)
+        ]
+    )
+
+
+def cost_function(
+        x,
+        constants,
+        max_simulation_steps,
+        drivers,
+        orientation_weight_function,
+        mode,
+        display_particle_movement=False
+):
+    costs = np.zeros(x.shape[0])
+    penalty_multiplier = 3
+
+    for solution_index in range(x.shape[0]):
+        battleground_obj = Battleground(
+            calibration_instructions={'movement': False, 'orientation': True},
+            weighting_instruction={'movement': True, 'orientation': True},
+            polygons=
+            [
+                np.array(
+                    [[0, 0], [1, 0], [1, 1], [0, 1]]
+                ),
+                np.array(
+                    [[0.4, 0.4], [0.8, 0.4], [0.8, 0.6], [0.4, 0.6]]
+                ),
+                np.array(
+                    [[0.2, 0.2], [0.3, 0.2], [0.3, 0.7], [0.2, 0.7]]
+                ),
+                np.array(
+                    [[0.4, 0.8], [0.9, 0.8], [0.9, 0.82], [0.35, 0.82]]
+                ),
+                np.array(
+                    [[0.85, 0.1], [0.87, 0.1], [0.87, 0.7], [0.84, 0.7]]
+                )
+            ]
+        )
+
+        trainables = [x[solution_index, var_index] for var_index in range(x.shape[1])] if mode == 'attack' else constants
+        particle_01 = Free_Player(
+            saving_directory='states/',
+            trainables={'orientation': trainables},
+            drivers=drivers,
+            orientation_weight_function=orientation_weight_function,
+            velocity=np.array([1, 0]),
+            coordinates=np.array([0.1, 0.1]),
+            step_size=0.025,
+            battleground=battleground_obj,
+            inertia_weight=0.3,
+            power=1
+        )
+
+        trainables = [x[solution_index, var_index] for var_index in range(x.shape[1])] if mode == 'defense' else constants
+        particle_02 = Free_Player(
+            saving_directory='states/',
+            trainables={'orientation': trainables},
+            drivers=drivers,
+            orientation_weight_function=orientation_weight_function,
+            velocity=np.array([-1, 0]),
+            coordinates=np.array([0.95, 0.45]),
+            step_size=0.025,
+            battleground=battleground_obj,
+            inertia_weight=0.3,
+            power=0.5
+        )
+
+        battleground_obj.set_particles([particle_01, particle_02])
+
+        did_collide_boundaries = False
+        did_collide_each_other = False
+        for step in range(1, max_simulation_steps + 1):
+
+            battleground_obj.next(
+                plot_properties={
+                    'active': True, 'steps': 10, 'fps': 30, 'show_block': False
+                } if display_particle_movement else {
+                    'active': False
+                }
+            )
+
+            boundaries_collision, particles_collision = battleground_obj.check_status()
+
+            if boundaries_collision:
+                did_collide_boundaries = True
+                break
+
+            if particles_collision:
+                did_collide_each_other = True
+                break
+
+        if mode == 'attack':
+            costs[solution_index] = step
+        elif mode == 'defense':
+            costs[solution_index] = max_simulation_steps - step
+
+        costs[solution_index] += penalty_multiplier * (max_simulation_steps - step) if did_collide_boundaries else 0
+
+    return costs
+
+
+if __name__ == '__main__':
+
+    if optimization_weight_function_format == 'polynomial':
+        weight_function = WeightFunctions.polynomial_degree_3_orientation_weight
+    elif optimization_weight_function_format == 'sigmoid':
+        weight_function = WeightFunctions.sigmoid_orientation_weight
+
+    phases = ['attack', 'defense']
+    n_rotational_training_phases = 20
+    constants = np.array([1, 1, 1])
+    for train_index in range(1, n_rotational_training_phases):
+        mode = phases[train_index % 2]
+        print(f'{train_index} => Mode: {mode} - Constants: {constants}')
+
+        optimizer = GlobalBestPSO(
+            n_particles=n_particles,
+            dimensions=n_var,
+            options=hyper_parameters,
+            bounds=(x_min, x_max)
+            # ftol=0.1,
+            # ftol_iter=8
+        )
+
+        best_cost, best_pos = optimizer.optimize(
+            cost_function,
+            constants=constants,
+            mode=mode,
+            max_simulation_steps=max_simulation_steps,
+            drivers=drivers,
+            orientation_weight_function=weight_function,
+            iters=n_iterations,
+            n_processes=n_processes
+        )
+
+        _ = cost_function(
+            best_pos.reshape(1, n_var),
+            constants=constants,
+            mode=mode,
+            max_simulation_steps=max_simulation_steps,
+            drivers=drivers,
+            orientation_weight_function=weight_function,
+            display_particle_movement=True
+        )
+
+        constants = copy(best_pos)
+
+    plot_cost_history(cost_history=optimizer.cost_history)
+    plt.show()
