@@ -15,4 +15,7 @@ battle = Battleground(
 
 battle.initialize_sample_particles()
 
+for i in range(100):
+    battle.next()
+
 print('Game is finished!')
